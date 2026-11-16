@@ -6,6 +6,7 @@ export function pragueClock(now = new Date()) {
       month: "2-digit",
       day: "2-digit",
       hour: "2-digit",
+      minute: "2-digit",
       hourCycle: "h23",
     })
       .formatToParts(now)
@@ -14,24 +15,71 @@ export function pragueClock(now = new Date()) {
   return {
     date: `${parts.year}-${parts.month}-${parts.day}`,
     hour: Number(parts.hour),
+    minute: Number(parts.minute),
   };
 }
-// Subscriptions are untrusted input. Never send requests to arbitrary/private hosts.
-export function allowedPushEndpoint(endpoint) {
-  try {
-    const url = new URL(endpoint);
-    return (
-      url.protocol === "https:" &&
-      !url.username &&
-      !url.password &&
-      !url.port &&
-      ((url.hostname === "fcm.googleapis.com" &&
-        url.pathname.startsWith("/fcm/send/")) ||
-        (url.hostname === "updates.push.services.mozilla.com" &&
-          url.pathname.startsWith("/wpush/")) ||
-        (url.hostname === "web.push.apple.com" && url.pathname.startsWith("/")))
-    );
-  } catch {
-    return false;
-  }
+export function inDeliveryWindow({ hour, minute }) {
+  const time = hour * 60 + minute;
+  return time >= 10 * 60 + 17 && time <= 11 * 60 + 29;
+}
+export async function deliverMessages({
+  db,
+  messaging,
+  messages,
+  tokens,
+  force = false,
+}) {
+  const checked = (result) => {
+    if (result.error) throw result.error;
+    return result.data;
+  };
+  let sent = 0,
+    failed = 0;
+  for (const message of messages)
+    for (const device of tokens) {
+      const previous = checked(
+        await db
+          .from("fcm_deliveries")
+          .select("message_id")
+          .eq("message_id", message.id)
+          .eq("token_id", device.id)
+          .maybeSingle(),
+      );
+      if (previous && !force) continue;
+      try {
+        await messaging.send({
+          token: device.token,
+          data: { tag: `love-${message.id}` },
+          webpush: { headers: { TTL: "86400", Urgency: "normal" } },
+        });
+        checked(
+          await db
+            .from("fcm_deliveries")
+            .upsert({
+              message_id: message.id,
+              token_id: device.id,
+              sent_at: new Date().toISOString(),
+            }),
+        );
+        sent++;
+      } catch (error) {
+        if (
+          [
+            "messaging/registration-token-not-registered",
+            "messaging/invalid-registration-token",
+          ].includes(error.code)
+        ) {
+          checked(await db.from("fcm_tokens").delete().eq("id", device.id));
+        } else {
+          console.error(
+            "Delivery failed for device",
+            device.id,
+            "code",
+            error.code ?? "unknown",
+          );
+          failed++;
+        }
+      }
+    }
+  return { sent, failed };
 }

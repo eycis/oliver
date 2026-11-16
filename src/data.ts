@@ -5,6 +5,13 @@ export const db =
     ? createClient(
         import.meta.env.VITE_SUPABASE_URL,
         import.meta.env.VITE_SUPABASE_ANON_KEY,
+        {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+          },
+        },
       )
     : null;
 export const clean = (value: string) =>
@@ -17,7 +24,7 @@ export type Message = {
   id: string;
   body: string;
   title: string;
-  delivery_date: string;
+  delivery_date: string | null;
   category: string;
 };
 export type Comment = {
@@ -36,9 +43,11 @@ export const today = () =>
     day: "2-digit",
   }).format(new Date());
 export const dateLabel = (date: string) =>
-  new Intl.DateTimeFormat("cs", { day: "numeric", month: "long" }).format(
-    new Date(date + "T12:00:00"),
-  );
+  new Intl.DateTimeFormat("cs", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(date + "T12:00:00"));
 const day = (offset: number) => {
   const d = new Date(today() + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + offset);

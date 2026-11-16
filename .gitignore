@@ -4,3 +4,8 @@ dist/
 .env.*
 !.env.example
 *.tsbuildinfo
+.private/
+*serviceAccount*.json
+*service-account*.json
+supabase/vzkazy-*.csv
+.env.example

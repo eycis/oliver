@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from "react";
 import {
-  ArrowRight,
-  Bell,
-  Check,
-  LogOut,
-  Mail,
-  X,
-} from "lucide-react";
+  readAccessKey,
+  forgetAccessKey,
+  callLink,
+  type Snapshot,
+} from "./access";
+import { useEffect, useRef, useState } from "react";
+import { Bell, Check, LogOut, Mail, X } from "lucide-react";
 import {
   db,
   clean,
@@ -94,29 +93,43 @@ export default function App() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [member, setMember] = useState<Member | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [accessKey, setAccessKey] = useState<string | null>(() =>
+    readAccessKey(),
+  );
+  const accessKeyRef = useRef(accessKey);
+  accessKeyRef.current = accessKey;
+  const userId = member?.id ?? null;
   const [modal, setModal] = useState<"settings" | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(Boolean(db));
   const [comment, setComment] = useState("");
-  const [email, setEmail] = useState("");
   const demo = !db;
+  useEffect(() => {
+    const acceptLink = () => {
+      if (!new URLSearchParams(location.hash.slice(1)).has("key")) return;
+      const nextKey = readAccessKey();
+      if (nextKey === accessKeyRef.current) return;
+      accessKeyRef.current = nextKey;
+      setAccessKey(nextKey);
+      if (db) {
+        setMember(null);
+        setMessages([]);
+        setComments([]);
+        setLoading(Boolean(nextKey));
+      }
+    };
+    window.addEventListener("hashchange", acceptLink);
+    return () => window.removeEventListener("hashchange", acceptLink);
+  }, []);
   async function refresh() {
-    if (!db) return;
-    const results = await Promise.all([
-      db
-        .from("messages")
-        .select("*")
-        .order("delivery_date", { ascending: false }),
-      db.from("comments").select("*").order("created_at"),
-      db.from("members").select("*"),
-    ]);
-    for (const result of results) if (result.error) throw result.error;
-    setMessages(results[0].data as Message[]);
-    setComments(results[1].data as Comment[]);
-    setMembers(results[2].data as Member[]);
-    return results[2].data as Member[];
+    if (!db || !accessKey) return;
+    const snapshot = await callLink<Snapshot>("read_letter", accessKey);
+    if (accessKeyRef.current !== accessKey) return;
+    setMessages(snapshot.messages);
+    setComments(snapshot.comments);
+    setMembers(snapshot.members);
+    setMember(snapshot.member);
   }
   useEffect(() => {
     if (!db) {
@@ -132,30 +145,51 @@ export default function App() {
       }
       return;
     }
-    const {
-      data: { subscription },
-    } = db.auth.onAuthStateChange((_event, session) => {
-      setUserId(session?.user.id ?? null);
-      setLoading(false);
-    });
-    return () => subscription.unsubscribe();
   }, []);
   useEffect(() => {
     if (demo && messages.length)
       localStorage.setItem("love-demo", JSON.stringify({ messages, comments }));
   }, [messages, comments, demo]);
   useEffect(() => {
-    if (!userId || !db) return;
+    if (!db || !accessKey) {
+      setLoading(false);
+      return;
+    }
     const load = () =>
       refresh()
-        .then((list) => setMember(list?.find((m) => m.id === userId) ?? null))
-        .catch(() =>
-          setNotice("Schránku se nepodařilo načíst. Zkus obnovit stránku."),
-        );
+        .catch(() => {
+          setMember(null);
+          setMessages([]);
+          setComments([]);
+          setNotice(
+            "Odkaz se nepodařilo ověřit. Zkontroluj připojení nebo otevři soukromý odkaz znovu.",
+          );
+        })
+        .finally(() => {
+          if (accessKeyRef.current === accessKey) setLoading(false);
+        });
     void load();
     const timer = setInterval(load, 30000);
     return () => clearInterval(timer);
-  }, [userId]);
+  }, [accessKey]);
+  useEffect(() => {
+    if (!accessKey || member?.role !== "recipient") return;
+    let cancelled = false;
+    let stop = () => {};
+    void import("./notifications")
+      .then((n) => n.startNotifications(accessKey))
+      .then((cleanup) => {
+        if (cancelled) cleanup();
+        else stop = cleanup;
+      })
+      .catch(() =>
+        setNotice("Upozornění se nepodařilo obnovit. Zkus je zapnout v menu."),
+      );
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [accessKey, member?.role]);
   useEffect(() => {
     if (!notice) return;
     const id = setTimeout(() => setNotice(""), 6500);
@@ -203,7 +237,10 @@ export default function App() {
     };
   }, [modal]);
   const delivered = messages
-    .filter((m) => m.delivery_date <= today())
+    .filter(
+      (m): m is Message & { delivery_date: string } =>
+        m.delivery_date !== null && m.delivery_date <= today(),
+    )
     .sort((a, b) => b.delivery_date.localeCompare(a.delivery_date));
   const current = delivered[0];
   const currentComments = comments.filter((c) => c.message_id === current?.id);
@@ -212,7 +249,7 @@ export default function App() {
     try {
       await action();
     } catch (error) {
-      console.error(error);
+      console.error("Požadavek se nezdařil.");
       setNotice("To se nepovedlo. Zkontroluj připojení a zkus to znovu.");
     } finally {
       setBusy(false);
@@ -229,8 +266,10 @@ export default function App() {
         body: text,
       };
       if (db) {
-        const { error } = await db.from("comments").insert(payload);
-        if (error) throw error;
+        await callLink("add_letter_comment", accessKey!, {
+          p_message_id: current.id,
+          p_body: text,
+        });
         await refresh();
       } else
         setComments([
@@ -249,54 +288,21 @@ export default function App() {
       setNotice("Upozornění budou dostupná po připojení společné schránky.");
       return;
     }
-    if (!("PushManager" in window) || !("serviceWorker" in navigator)) {
-      setNotice(
-        "Tento prohlížeč nepodporuje oznámení. Zkus Chrome na Androidu.",
-      );
-      return;
-    }
+    if (!accessKey || member?.role !== "recipient") return;
     await run(async () => {
-      const key = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-      if (!key) {
-        setNotice(
-          "Pro upozornění ještě chybí nastavení veřejného VAPID klíče.",
-        );
-        return;
-      }
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        setNotice(
-          "Oznámení nejsou povolena. Změnit to můžeš v nastavení prohlížeče.",
-        );
-        return;
-      }
-      const registration = await navigator.serviceWorker.ready;
-      const raw = atob(key.replace(/-/g, "+").replace(/_/g, "/"));
-      const applicationServerKey = Uint8Array.from(raw, (c) => c.charCodeAt(0));
-      const subscription =
-        (await registration.pushManager.getSubscription()) ??
-        (await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey,
-        }));
-      const json = subscription.toJSON();
-      const { error } = await db!.from("push_subscriptions").upsert(
-        {
-          user_id: userId,
-          endpoint: json.endpoint,
-          p256dh: json.keys?.p256dh,
-          auth: json.keys?.auth,
-        },
-        { onConflict: "endpoint" },
-      );
-      if (error) throw error;
+      const { enableNotifications } = await import("./notifications");
+      await enableNotifications(accessKey);
       setNotice("Hotovo! Nové vzkazy se připomenou i na telefonu.");
     });
   }
   return (
     <div className="app">
       <header className="header">
-        <a className="brand" href={import.meta.env.BASE_URL} aria-label="Dnešní vzkaz">
+        <a
+          className="brand"
+          href={import.meta.env.BASE_URL}
+          aria-label="Dnešní vzkaz"
+        >
           <PixelHeart small />
         </a>
         <button
@@ -310,151 +316,109 @@ export default function App() {
       <main>
         {loading ? (
           <div className="empty">Otevírám schránku…</div>
-        ) : !demo && !userId ? (
+        ) : !demo && !member ? (
           <section className="login panel">
             <PixelHeart />
-            <h2>Naše malé tajemství</h2>
-            <p>Přihlas se svým e-mailem. Pošleme ti kouzelný odkaz.</p>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void run(async () => {
-                  const { error } = await db!.auth.signInWithOtp({
-                    email,
-                    options: {
-                      shouldCreateUser: false,
-                      emailRedirectTo:
-                        location.origin + import.meta.env.BASE_URL,
-                    },
-                  });
-                  if (error) throw error;
-                  setNotice(
-                    "Pokud máš přístup, přihlašovací odkaz čeká v e-mailu.",
-                  );
-                });
-              }}
-            >
-              <label>
-                Tvůj e-mail
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="ty@example.cz"
-                />
-              </label>
-              <button className="primary" disabled={busy}>
-                Poslat přihlašovací odkaz <ArrowRight size={16} />
-              </button>
-            </form>
+            <p>
+              Otevři svůj soukromý odkaz. Na tomhle telefonu si ho zapamatuju.
+            </p>
           </section>
-        ) : !demo && !member ? (
-          <div className="empty">
-            Tento účet zatím nemá přístup do schránky. Obnov stránku po přidání
-            účtu správcem.
-          </div>
         ) : (
           <>
             <div className="layout">
               <section className="main-column">
                 {current ? (
-                    <>
-                      <div className="section-label">
-                        <time dateTime={current.delivery_date}>
-                          {dateLabel(current.delivery_date)}
-                        </time>
-                      </div>
-                      <article
-                        className="letter"
-                        aria-labelledby="letter-title"
-                      >
-                        <span
-                          className="pixel-corner top-left"
-                          aria-hidden="true"
-                        />
-                        <span
-                          className="pixel-corner top-right"
-                          aria-hidden="true"
-                        />
-                        <span
-                          className="pixel-corner bottom-left"
-                          aria-hidden="true"
-                        />
-                        <span
-                          className="pixel-corner bottom-right"
-                          aria-hidden="true"
-                        />
-                        <div className="letter-content">
-                          <div className="heart-scene" aria-hidden="true">
-                            <PixelSparkle className="sparkle-left" />
-                            <PixelHeart />
-                            <PixelSparkle className="sparkle-right" />
-                            <span className="pixel-mote mote-left" />
-                            <span className="pixel-mote mote-right" />
-                          </div>
-                          <h1 id="letter-title" className="sr-only">
-                            {current.title}
-                          </h1>
-                          <p>{current.body}</p>
-                          <div className="pixel-garden" aria-hidden="true">
-                            <PixelFlower />
-                            <span className="pixel-trail" />
-                            <PixelHeart small />
-                            <PixelHeart small />
-                            <PixelHeart small />
-                            <span className="pixel-trail" />
-                            <PixelFlower />
-                          </div>
-                        </div>
-                      </article>
-                      <section className="comments" aria-label="Komentáře">
-                        {currentComments.length > 0 &&
-                          currentComments.map((c) => (
-                            <div className="comment" key={c.id}>
-                              <span className="avatar">
-                                <PixelHeart small />
-                              </span>
-                              <div>
-                                <strong>
-                                  {members.find((m) => m.id === c.user_id)
-                                    ?.name ?? "Já"}{" "}
-                                </strong>
-                                <p>{c.body}</p>
-                              </div>
-                            </div>
-                          ))}
-                        <form className="comment-form" onSubmit={addComment}>
-                          <input
-                            aria-label="Komentář"
-                            placeholder="napiš mi taky něco :)"
-                            value={comment}
-                            maxLength={280}
-                            onChange={(e) => setComment(e.target.value)}
-                            required
-                          />
-                          <button
-                            aria-label="Odeslat komentář"
-                            disabled={busy || !comment.trim()}
-                          >
-                            <PixelIcon kind="send" />
-                          </button>
-                        </form>
-                        {comment.length > 240 && (
-                          <span className="private-note">
-                            {comment.length} / 280
-                          </span>
-                        )}
-                      </section>
-                    </>
-                  ) : (
-                    <div className="empty panel">
-                      <Mail />
-                      <h2>První radost je teprve na cestě</h2>
-                      <p>
-                        Až přijde jeho den, najdeš ho právě tady.
-                      </p>
+                  <>
+                    <div className="section-label">
+                      <time dateTime={current.delivery_date}>
+                        {dateLabel(current.delivery_date)}
+                      </time>
                     </div>
+                    <article className="letter" aria-labelledby="letter-title">
+                      <span
+                        className="pixel-corner top-left"
+                        aria-hidden="true"
+                      />
+                      <span
+                        className="pixel-corner top-right"
+                        aria-hidden="true"
+                      />
+                      <span
+                        className="pixel-corner bottom-left"
+                        aria-hidden="true"
+                      />
+                      <span
+                        className="pixel-corner bottom-right"
+                        aria-hidden="true"
+                      />
+                      <div className="letter-content">
+                        <div className="heart-scene" aria-hidden="true">
+                          <PixelSparkle className="sparkle-left" />
+                          <PixelHeart />
+                          <PixelSparkle className="sparkle-right" />
+                          <span className="pixel-mote mote-left" />
+                          <span className="pixel-mote mote-right" />
+                        </div>
+                        <h1 id="letter-title" className="sr-only">
+                          {current.title}
+                        </h1>
+                        <p>{current.body}</p>
+                        <div className="pixel-garden" aria-hidden="true">
+                          <PixelFlower />
+                          <span className="pixel-trail" />
+                          <PixelHeart small />
+                          <PixelHeart small />
+                          <PixelHeart small />
+                          <span className="pixel-trail" />
+                          <PixelFlower />
+                        </div>
+                      </div>
+                    </article>
+                    <section className="comments" aria-label="Komentáře">
+                      {currentComments.length > 0 &&
+                        currentComments.map((c) => (
+                          <div className="comment" key={c.id}>
+                            <span className="avatar">
+                              <PixelHeart small />
+                            </span>
+                            <div>
+                              <strong>
+                                {members.find((m) => m.id === c.user_id)
+                                  ?.name ?? "Já"}{" "}
+                              </strong>
+                              <p>{c.body}</p>
+                            </div>
+                          </div>
+                        ))}
+                      <form className="comment-form" onSubmit={addComment}>
+                        <input
+                          aria-label="Komentář"
+                          placeholder="napiš mi taky něco :)"
+                          value={comment}
+                          maxLength={280}
+                          onChange={(e) => setComment(e.target.value)}
+                          required
+                        />
+                        <button
+                          aria-label="Odeslat komentář"
+                          disabled={busy || !comment.trim()}
+                        >
+                          <PixelIcon kind="send" />
+                        </button>
+                      </form>
+                      {comment.length > 240 && (
+                        <span className="private-note">
+                          {comment.length} / 280
+                        </span>
+                      )}
+                    </section>
+                  </>
+                ) : (
+                  <div className="empty panel">
+                    <Mail />
+                    <h2>První radost je teprve na cestě</h2>
+                    <p>Až přijde jeho den, najdeš ho právě tady.</p>
+                  </div>
                 )}
               </section>
             </div>
@@ -496,40 +460,46 @@ export default function App() {
               <X />
             </button>
             <PixelHeart small />
-                <h3>můžeš si mě přidat na plochu ;)</h3>
-                <p>
-                  Na Androidu otevři web v Chrome. V nabídce ⋮ vyber „Přidat na
-                  plochu“ nebo „Nainstalovat aplikaci“.
-                </p>
-                <button
-                  className="primary"
-                  disabled={busy}
-                  onClick={() => void enablePush()}
-                >
-                  <Bell size={17} /> posílej mi upozornění
-                </button>
-                {demo && (
-                  <p className="setting-note">
-                    Ukázkový režim: pro sdílení a oznámení připoj Supabase podle
-                    README projektu.
-                  </p>
-                )}
-                {userId && (
-                  <button
-                    className="text-button"
-                    onClick={() =>
-                      void run(async () => {
-                        await db!.auth.signOut();
-                        setMessages([]);
-                        setComments([]);
-                        setMember(null);
-                        setModal(null);
-                      })
-                    }
-                  >
-                    <LogOut size={16} /> Odhlásit se
-                  </button>
-                )}
+            <h3>můžeš si mě přidat na plochu ;)</h3>
+            <p>
+              Na Androidu otevři web v Chrome. V nabídce ⋮ vyber „Přidat na
+              plochu“ nebo „Nainstalovat aplikaci“.
+            </p>
+            {(demo || member?.role === "recipient") && (
+              <button
+                className="primary"
+                disabled={busy}
+                onClick={() => void enablePush()}
+              >
+                <Bell size={17} /> posílej mi upozornění
+              </button>
+            )}
+            {demo && (
+              <p className="setting-note">
+                Ukázkový režim: pro sdílení a oznámení připoj Supabase podle
+                README projektu.
+              </p>
+            )}
+            {userId && (
+              <button
+                className="text-button"
+                onClick={() =>
+                  void run(async () => {
+                    const { disableNotifications } =
+                      await import("./notifications");
+                    await disableNotifications(accessKey!);
+                    forgetAccessKey();
+                    setAccessKey(null);
+                    setMessages([]);
+                    setComments([]);
+                    setMember(null);
+                    setModal(null);
+                  })
+                }
+              >
+                <LogOut size={16} /> Zapomenout přístup
+              </button>
+            )}
           </section>
         </div>
       )}

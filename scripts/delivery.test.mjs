@@ -1,39 +1,96 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pragueClock, allowedPushEndpoint } from "./delivery.mjs";
-test("Prague schedule follows summer and winter time", () => {
-  assert.deepEqual(pragueClock(new Date("2026-07-01T07:00:00Z")), {
+import { pragueClock, inDeliveryWindow, deliverMessages } from "./delivery.mjs";
+test("Prague window follows summer/winter and includes exact boundaries", () => {
+  assert.deepEqual(pragueClock(new Date("2026-07-01T08:17:00Z")), {
     date: "2026-07-01",
-    hour: 9,
+    hour: 10,
+    minute: 17,
   });
-  assert.deepEqual(pragueClock(new Date("2026-12-01T08:00:00Z")), {
+  assert.deepEqual(pragueClock(new Date("2026-12-01T09:17:00Z")), {
     date: "2026-12-01",
-    hour: 9,
+    hour: 10,
+    minute: 17,
   });
-  assert.deepEqual(pragueClock(new Date("2026-12-31T23:05:00Z")), {
-    date: "2027-01-01",
-    hour: 0,
-  });
-});
-test("push endpoints cannot target private networks or attacker domains", () => {
-  for (const value of [
-    "http://fcm.googleapis.com/fcm/send/a",
-    "https://127.0.0.1/a",
-    "https://fcm.googleapis.com.evil.test/fcm/send/a",
-    "https://fcm.googleapis.com@evil.test/a",
-    "https://fcm.googleapis.com:444/fcm/send/a",
-    "https://fcm.googleapis.com/other",
-    "garbage",
+  for (const [hour, minute, expected] of [
+    [10, 16, false],
+    [10, 17, true],
+    [11, 29, true],
+    [11, 30, false],
+    [0, 0, false],
   ])
-    assert.equal(allowedPushEndpoint(value), false, value);
-  assert.equal(
-    allowedPushEndpoint("https://fcm.googleapis.com/fcm/send/token"),
-    true,
+    assert.equal(inDeliveryWindow({ hour, minute }), expected);
+});
+function fakeDatabase() {
+  const deliveries = new Set(),
+    removed = [];
+  return {
+    deliveries,
+    removed,
+    from(table) {
+      const filters = {};
+      return {
+        select() {
+          return this;
+        },
+        eq(k, v) {
+          filters[k] = v;
+          return this;
+        },
+        maybeSingle() {
+          return { data: deliveries.has(filters.token_id) ? {} : null };
+        },
+        upsert(row) {
+          deliveries.add(row.token_id);
+          return { data: null };
+        },
+        delete() {
+          return {
+            eq: (_k, id) => {
+              removed.push(id);
+              return { data: null };
+            },
+          };
+        },
+      };
+    },
+  };
+}
+test("FCM retries only failed devices, removes expired tokens, force resends same message", async () => {
+  const db = fakeDatabase(),
+    calls = [];
+  let fail = true;
+  const messaging = {
+    async send(payload) {
+      calls.push(payload);
+      if (payload.token === "expired")
+        throw { code: "messaging/registration-token-not-registered" };
+      if (payload.token === "retry" && fail)
+        throw { code: "messaging/internal-error" };
+    },
+  };
+  const args = {
+    db,
+    messaging,
+    messages: [{ id: "m1" }],
+    tokens: [
+      { id: "a", token: "ok" },
+      { id: "b", token: "retry" },
+      { id: "c", token: "expired" },
+    ],
+  };
+  assert.deepEqual(await deliverMessages(args), { sent: 1, failed: 1 });
+  assert.deepEqual(db.removed, ["c"]);
+  fail = false;
+  assert.deepEqual(
+    await deliverMessages({ ...args, tokens: args.tokens.slice(0, 2) }),
+    { sent: 1, failed: 0 },
   );
-  assert.equal(
-    allowedPushEndpoint(
-      "https://updates.push.services.mozilla.com/wpush/v2/token",
-    ),
-    true,
+  assert.equal(calls.filter((p) => p.token === "ok").length, 1);
+  assert.deepEqual(
+    await deliverMessages({ ...args, tokens: [args.tokens[0]], force: true }),
+    { sent: 1, failed: 0 },
   );
+  assert.equal(calls.at(-1).data.tag, "love-m1");
+  assert.equal("notification" in calls[0], false);
 });

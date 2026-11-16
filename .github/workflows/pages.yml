@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm test
@@ -25,7 +25,8 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
-          VITE_VAPID_PUBLIC_KEY: ${{ vars.VITE_VAPID_PUBLIC_KEY }}
+          VITE_FIREBASE_CONFIG: ${{ vars.VITE_FIREBASE_CONFIG }}
+          VITE_FIREBASE_VAPID_KEY: ${{ vars.VITE_FIREBASE_VAPID_KEY }}
           VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

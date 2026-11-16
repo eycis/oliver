@@ -84,16 +84,31 @@ try {
   assert.equal(await evaluate(`document.querySelector('.comment img')`), null);
   await evaluate(`document.querySelector('button[aria-label="Menu"]').click()`);
   await pause();
-  assert.equal(await evaluate(`document.body.textContent.includes('Napsat nový vzkaz')`), false, 'Message creation is not available');
-  assert.equal(await evaluate(`!!document.querySelector('.modal form')`), false);
-  await evaluate(`document.querySelector('.modal button[aria-label="Zavřít"]').click()`);
+  assert.equal(
+    await evaluate(`document.body.textContent.includes('Napsat nový vzkaz')`),
+    false,
+    "Message creation is not available",
+  );
+  assert.equal(
+    await evaluate(`!!document.querySelector('.modal form')`),
+    false,
+  );
+  await evaluate(
+    `document.querySelector('.modal button[aria-label="Zavřít"]').click()`,
+  );
   await pause();
   await cdp("Page.reload");
   await new Promise((r) => setTimeout(r, 900));
-  assert.equal(await evaluate(`document.querySelector('.comment p')?.textContent`), 'Já & ty ♡', 'Comment persists');
+  assert.equal(
+    await evaluate(`document.querySelector('.comment p')?.textContent`),
+    "Já & ty ♡",
+    "Comment persists",
+  );
   await evaluate(`document.querySelector('button[aria-label="Menu"]').click()`);
   await pause();
-  await evaluate(`document.querySelector('.modal button[aria-label="Zavřít"]').click()`);
+  await evaluate(
+    `document.querySelector('.modal button[aria-label="Zavřít"]').click()`,
+  );
   await pause();
   await cdp("Emulation.setDeviceMetricsOverride", {
     width: 390,
@@ -123,6 +138,25 @@ try {
     await evaluate(`navigator.serviceWorker.ready.then(r => !!r.active)`),
     true,
   );
+  assert.equal(
+    await evaluate(`document.querySelector('input[type="email"]')`),
+    null,
+    "No email login",
+  );
+  await cdp("Page.navigate", {
+    url: "http://localhost:5173/#key=" + "a".repeat(43),
+  });
+  await new Promise((r) => setTimeout(r, 900));
+  assert.equal(
+    await evaluate("location.hash"),
+    "",
+    "Private key removed from address bar",
+  );
+  assert.equal(
+    await evaluate(`localStorage.getItem('love-private-key')`),
+    "a".repeat(43),
+  );
+  await evaluate(`localStorage.removeItem('love-private-key')`);
   console.log(
     "PASS: demo, sanitized comment, read-only message UI, persistence, mobile layout, manifest and service worker.",
   );

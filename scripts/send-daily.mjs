@@ -1,93 +1,76 @@
 import { createClient } from "@supabase/supabase-js";
-import webpush from "web-push";
-import { pragueClock, allowedPushEndpoint } from "./delivery.mjs";
-for (const key of [
-  "SUPABASE_URL",
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "VAPID_PUBLIC_KEY",
-  "VAPID_PRIVATE_KEY",
-  "VAPID_SUBJECT",
-]) {
-  if (!process.env[key]) throw new Error(`Missing ${key}`);
-}
-const clock = pragueClock();
-if (clock.hour < 9) {
-  console.log("Before the daily delivery window.");
-  process.exit(0);
-}
-const db = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  { auth: { persistSession: false } },
-);
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT,
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY,
-);
-function checked(result) {
-  if (result.error) throw result.error;
-  return result.data;
-}
-// Only today's message: a newly subscribed phone does not receive the entire archive.
-const messages = checked(
-  await db.from("messages").select("id").eq("delivery_date", clock.date),
-);
-const recipient = checked(
-  await db.from("members").select("id").eq("role", "recipient").maybeSingle(),
-);
-if (!recipient || !messages.length) {
-  console.log("No message or recipient for today.");
-  process.exit(0);
-}
-const subscriptions = checked(
-  await db.from("push_subscriptions").select("*").eq("user_id", recipient.id),
-);
-let failures = 0;
-for (const message of messages)
-  for (const sub of subscriptions) {
-    const previous = checked(
-      await db
-        .from("push_deliveries")
-        .select("message_id")
-        .eq("message_id", message.id)
-        .eq("subscription_id", sub.id)
-        .maybeSingle(),
-    );
-    if (previous) continue;
-    if (!allowedPushEndpoint(sub.endpoint)) {
-      console.error("Unsupported push provider; skipping subscription", sub.id);
-      failures++;
-      continue;
-    }
-    try {
-      await webpush.sendNotification(
-        {
-          endpoint: sub.endpoint,
-          keys: { p256dh: sub.p256dh, auth: sub.auth },
-        },
-        JSON.stringify({ tag: `love-${message.id}` }),
-        { TTL: 86400, timeout: 15000 },
-      );
-      checked(
-        await db
-          .from("push_deliveries")
-          .insert({ message_id: message.id, subscription_id: sub.id }),
-      );
-      console.log("Delivery accepted:", message.id, sub.id);
-    } catch (error) {
-      if (error.statusCode === 404 || error.statusCode === 410) {
-        checked(await db.from("push_subscriptions").delete().eq("id", sub.id));
-      } else {
-        // Do not log the provider response or subscription endpoint: these are private.
-        console.error(
-          "Delivery failed:",
-          sub.id,
-          "status:",
-          error.statusCode ?? "unknown",
-        );
-        failures++;
-      }
-    }
+import { initializeApp, cert } from "firebase-admin/app";
+import { getMessaging } from "firebase-admin/messaging";
+import { pragueClock, inDeliveryWindow, deliverMessages } from "./delivery.mjs";
+async function main() {
+  const force = process.env.FORCE_SEND === "1";
+  if (!force && !inDeliveryWindow(pragueClock())) {
+    console.log("Outside 10:17–11:29 Europe/Prague.");
+    return;
   }
-if (failures) process.exitCode = 1;
+  for (const name of [
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "FIREBASE_SERVICE_ACCOUNT_JSON",
+  ]) {
+    if (!process.env[name]) throw new Error(`Missing ${name}`);
+  }
+  const account = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+  const projectId = process.env.FIREBASE_PROJECT_ID || account.project_id;
+  if (projectId !== account.project_id)
+    throw new Error("Firebase project does not match service account.");
+  initializeApp({ credential: cert(account), projectId });
+  const db = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { persistSession: false } },
+  );
+  const checked = (result) => {
+    if (result.error)
+      throw new Error(
+        "Database operation failed; check schema and server key.",
+      );
+    return result.data;
+  };
+  const recipient = checked(
+    await db
+      .from("link_members")
+      .select("id")
+      .eq("role", "recipient")
+      .eq("active", true)
+      .maybeSingle(),
+  );
+  if (!recipient) {
+    console.log("No active recipient link configured.");
+    return;
+  }
+  const messages = checked(
+    await db.rpc("pick_daily_message", { p_force: force }),
+  );
+  if (!messages.length) {
+    console.log("No unused messages remain.");
+    return;
+  }
+  const tokens = checked(
+    await db
+      .from("fcm_tokens")
+      .select("id,token")
+      .eq("member_id", recipient.id),
+  );
+  const { sent, failed } = await deliverMessages({
+    db,
+    messaging: getMessaging(),
+    messages,
+    tokens,
+    force,
+  });
+  console.log(`sent=${sent}, failed=${failed}, devices=${tokens.length}`);
+  if (failed) process.exitCode = 1;
+}
+main().catch(() => {
+  // Do not print credentials, private tokens or provider response bodies.
+  console.error(
+    "Daily job failed. Check required secrets, Firebase project and Supabase migration.",
+  );
+  process.exitCode = 1;
+});
