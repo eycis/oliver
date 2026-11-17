@@ -308,6 +308,15 @@ export default function App() {
                       </time>
                     </div>
                     <article className="letter" aria-labelledby="letter-title">
+                      <div className="window-titlebar">
+                        <svg className="mail-icon" viewBox="0 0 24 20" aria-hidden="true" shapeRendering="crispEdges">
+                          <path fill="#fff5dd" stroke="#693f53" strokeWidth="2" d="M1 3h22v16H1z" />
+                          <path fill="none" stroke="#ad6686" strokeWidth="2" d="m2 4 10 8L22 4M2 18l7-7m13 7-7-7" />
+                          <path fill="#d16d98" d="M9 5h2v1h2V5h2v3h-1v1h-1v1h-2V9h-1V8H9z" />
+                        </svg>
+                        <span>vzkaz.txt</span>
+                        <span className="window-decoration" aria-hidden="true"><span className="corner-heart"><PixelHeart small /></span></span>
+                      </div>
                       <span
                         className="pixel-corner top-left"
                         aria-hidden="true"
@@ -348,6 +357,7 @@ export default function App() {
                       </div>
                     </article>
                     <section className="comments" aria-label="Komentáře">
+                      <div className="reply-title"><PixelHeart small /><span>odpověď</span></div>
                       {currentComments.length > 0 &&
                         currentComments.map((c) => (
                           <div className="comment" key={c.id}>
