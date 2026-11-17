@@ -1,6 +1,6 @@
 # Srdíčková pošta ♡
 
-React + TypeScript, soukromé odkazy pro dva, jeden náhodný vzkaz denně a krátké komentáře. Bez e-mailového přihlášení, účtů Supabase Auth a SMTP. Vzkazy a komentáře zůstávají v Supabase. Firebase Cloud Messaging doručuje upozornění, GitHub Actions je odesílá pomocí Firebase Admin SDK — stejný princip jako v projektu `birthday_gift`.
+React + TypeScript, jeden veřejný odkaz pro všechny, jeden náhodný vzkaz denně a krátké komentáře. Bez e-mailového přihlášení, účtů Supabase Auth a SMTP. Vzkazy a komentáře zůstávají v Supabase. Firebase Cloud Messaging doručuje upozornění, GitHub Actions je odesílá pomocí Firebase Admin SDK — stejný princip jako v projektu `birthday_gift`.
 
 ## Spuštění a ověření
 
@@ -13,17 +13,17 @@ npm run build
 npm test
 ```
 
-Bez nastavení Supabase se spouští lokální ukázka. Ta nesdílí komentáře a neposílá upozornění. Testy ověřují skutečné SQL v lokálním PostgreSQL přes PGlite (přístupová oprávnění, soukromé odkazy, skrytí budoucích vzkazů, autorství, limity komentářů), časové pásmo a FCM retry logiku. Reálné doručení na telefon vyžaduje nakonfigurované služby.
+Bez nastavení Supabase se spouští lokální ukázka. Ta nesdílí komentáře a neposílá upozornění. Testy ověřují skutečné SQL v lokálním PostgreSQL přes PGlite (přístupová oprávnění, veřejný přístup, skrytí budoucích vzkazů, limity komentářů), časové pásmo a FCM retry logiku. Reálné doručení na telefon vyžaduje nakonfigurované služby.
 
 ## 1. Supabase — pokud už máš nahrané vzkazy
 
-Pokud už máš soukromé odkazy, spusť pouze `supabase/migrations/20261117_equal_notifications.sql`. Pokud je ještě nemáš, spusť nejprve `supabase/migrations/20261117_private_links_fcm.sql` a potom `20261117_equal_notifications.sql`. Pokud jsi ještě neprovedla přechod na náhodný výběr, spusť nejdřív `supabase/migrations/20261116_random_daily_message.sql`. Existující `schema.sql` s náhodným výběrem už první migraci obsahoval.
+Pokud máš tabulky `link_members` a `fcm_tokens`, spusť v SQL Editoru celý soubor `supabase/migrations/20261117_public_access.sql`. Zachová vzkazy, komentáře i odběry oznámení. Není potřeba generovat odkazy ani vytvářet uživatele.
 
-Nový projekt bez tabulek: jednou spusť celý aktuální `supabase/schema.sql`; samostatné migrace potom už nespouštěj. Migrace nejsou určeny k opakovanému spouštění.
+Pokud tyto tabulky ještě nemáš, nejprve spusť `20261116_random_daily_message.sql` (jen pokud dosud nemáš náhodný výběr) a `20261117_private_links_fcm.sql`, potom `20261117_public_access.sql`. U nového projektu bez tabulek stačí jednou celý `supabase/schema.sql`.
 
-Vzkazy se nemažou. Ani existující komentáře se nemažou. Nové tabulky jsou `link_members`, `fcm_tokens`, `fcm_deliveries`. Staré Auth tabulky a push subscriptions zůstanou zachované, ale aplikace je už nepoužívá. Jejich přímá oprávnění pro prohlížeč jsou odebraná.
+Web zpřístupňuje pouze poslední zveřejněný vzkaz a jeho komentáře přes omezené RPC funkce. Přímé čtení tabulek a budoucích vzkazů je zakázané. Komentáře jsou anonymní, maximálně 280 znaků, bez HTML; společný limit je 10 komentářů za minutu. Odběr oznámení ukládá technický FCM token zařízení, nikoli přihlašovací údaj. Limit je 100 zařízení.
 
-Účty ani SMTP nevytvářej. Funkce ověřují tajný klíč ze soukromého odkazu; v DB je uložen jen SHA-256 hash. Prohlížeč nemá přímý přístup k žádné tabulce. `delivery_date = NULL` znamená dosud nepoužitý vzkaz. Importované texty nepřidávej znovu.
+`delivery_date = NULL` znamená dosud nepoužitý vzkaz. Importované texty nepřidávej znovu.
 
 ## 2. Firebase — jen pro upozornění
 
@@ -56,22 +56,9 @@ V Settings → Pages vyber GitHub Actions. Dostupnost Pages v soukromém repozit
 
 Po změně proměnných spusť nový build. Frontend i `sw.js` dostanou totožnou veřejnou Firebase konfiguraci při sestavení. VAPID private key a staré `VAPID_SUBJECT` již nepotřebuješ.
 
-## 4. Dva soukromé odkazy
+## 4. Jeden odkaz
 
-Až znáš skutečnou HTTPS adresu webu, spusť lokálně (nahraď URL):
-
-```sh
-npm run links:create -- https://TVOJE-DOMENA/CESTA/
-```
-
-Skript vytvoří ignorovanou složku `.private/` s přístupem jen pro tvůj systémový účet:
-
-- `.private/setup-links.sql`: vlož celý obsah do Supabase SQL Editoru a spusť jednou. Vytvoří dvě identity bez Auth účtů.
-- `.private/links.txt`: dva různé odkazy. `author` je pro tebe, `recipient` pro Olivera. Klíče se nevypisují do terminálu.
-
-Otevřete každý vlastní odkaz. Klíč je v URL fragmentu `#key=…`, takže se neposílá hostingu v URL požadavku; aplikace jej uloží do localStorage a odstraní z adresního řádku. Další otevření a zkratka na ploše fungují bez zadávání klíče. Po vymazání dat prohlížeče je potřeba původní odkaz otevřít znovu. Na společném zařízení lze použít „Zapomenout přístup“; při úspěchu se zruší i místní odběr oznámení.
-
-Kdokoliv má soukromý odkaz, má přístup. Odkazy nesdílej veřejně. Pro zneplatnění nastav u identity `active = false`; pro výměnu změň její `token_hash` na hash nového náhodného klíče. Nová generace nesmí přepsat existující `.private` automaticky. Při změně domény lze ve stávajících odkazech změnit pouze základ URL a klíče ponechat. Žádná analytics služba se nenačítá.
+Oba otevřete **https://eycis.github.io/oliver/**. Není potřeba účet, heslo ani fragment `#key=`. Kdokoli s adresou může číst zveřejněný vzkaz, komentovat a povolit upozornění. Komentáře nerozlišují autora. Staré soukromé odkazy a skript `links:create` se již nepoužívají.
 
 ## 5. GitHub Actions — tajné hodnoty
 
@@ -86,17 +73,17 @@ Settings → Secrets and variables → Actions → **Secrets**:
 
 `APP_LINK` z birthday_gift tady nepotřebuješ: kliknutí na oznámení otevře adresu webu podle scope service workeru. Soukromý klíč ani text vzkazu se do FCM payloadu neposílají.
 
-Workflow kontroluje čas každých 15 minut (`7,22,37,52`). Odesílá v okně **10:17–11:29 Europe/Prague**, stejně jako birthday_gift, s automatickým letním časem. V databázi atomicky vybere jeden nepoužitý vzkaz pro dnešek; pak posílá oznámení na zařízení obou aktivních soukromých odkazů. Pro každý telefon eviduje úspěch zvlášť. Dočasné chyby se zkusí při dalším běhu znovu, vypršené tokeny odstraní. Po vyčerpání vzkazů nic nevybírá znovu.
+Workflow kontroluje čas každých 15 minut (`7,22,37,52`). Odesílá v okně **10:17–11:29 Europe/Prague**, stejně jako birthday_gift, s automatickým letním časem. V databázi atomicky vybere jeden nepoužitý vzkaz pro dnešek; pak posílá oznámení na všechna registrovaná zařízení. Pro každý telefon eviduje úspěch zvlášť. Dočasné chyby se zkusí při dalším běhu znovu, vypršené tokeny odstraní. Po vyčerpání vzkazů nic nevybírá znovu.
 
 Přijetí zprávy FCM negarantuje její zobrazení telefonem. Při pádu mezi odesláním a zápisem do DB se může oznámení opakovat; stejný tag omezuje hromadění duplicit. GitHub může běhy zpozdit nebo vynechat; ve veřejném repozitáři se plánování může vypnout po 60 dnech bez aktivity. Soukromý repozitář podléhá dostupným Actions minutám.
 
 ## 6. První test na telefonu
 
-1. Nasaď aktuální kód. Oliver otevře svůj `recipient` odkaz v podporovaném prohlížeči na HTTPS.
+1. Nasaď aktuální kód. Oliver otevře společnou adresu webu v podporovaném prohlížeči na HTTPS.
 2. V menu zvolí „posílej mi upozornění“ a povolí oznámení. V Supabase se objeví řádek `fcm_tokens`.
 3. GitHub → Actions → Daily love letter → Run workflow → `force_send = true`. To vybere dnešní vzkaz i mimo časové okno a odešle oznámení. Další ruční test pošle stejné dnešní oznámení znovu, nevybere jiný vzkaz.
 4. Vyzkoušej oznámení se zavřeným webem i s otevřenou aplikací. Jedno odeslání má vyvolat jedno oznámení. Otevření má ukázat stejný vzkaz a jeho datum.
-5. Ty otevři svůj `author` odkaz a přidej komentář; na jeho telefonu se načte do 30 sekund. Oba můžete zapnout upozornění na svých telefonech.
+5. Ty otevři stejnou adresu a přidej komentář; na jeho telefonu se načte do 30 sekund. Oba můžete zapnout upozornění na svých telefonech.
 6. Nakonec lze web přidat na plochu z nabídky prohlížeče. Pokud už měl telefon starý Web Push odběr, musí tlačítkem zaregistrovat nový Firebase odběr.
 
 ## Soubory a bezpečnost

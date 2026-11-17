@@ -32,13 +32,6 @@ async function main() {
       );
     return result.data;
   };
-  const members = checked(
-    await db.from("link_members").select("id").eq("active", true),
-  );
-  if (!members.length) {
-    console.log("No active links configured.");
-    return;
-  }
   const messages = checked(
     await db.rpc("pick_daily_message", { p_force: force }),
   );
@@ -49,11 +42,7 @@ async function main() {
   const tokens = checked(
     await db
       .from("fcm_tokens")
-      .select("id,token")
-      .in(
-        "member_id",
-        members.map((member) => member.id),
-      ),
+      .select("id,token"),
   );
   const { sent, failed } = await deliverMessages({
     db,

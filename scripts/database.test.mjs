@@ -182,6 +182,7 @@ test("Upgrade preserves imported messages and existing comments", async () => {
         "utf8",
       ),
     );
+    await db.exec(await readFile("supabase/migrations/20261117_public_access.sql", "utf8"));
     assert.equal(
       (await db.query("select body from messages")).rows[0].body,
       "Keep me",
@@ -202,4 +203,37 @@ test("Upgrade preserves imported messages and existing comments", async () => {
   } finally {
     await db.close();
   }
+});
+
+test("Public access works without identities and keeps future letters and tokens private", async () => {
+  const db = await setup();
+  try {
+    await db.exec("delete from link_members");
+    const { rows } = await db.query("insert into messages(title,body) values ('A','future A'),('B','future B') returning id");
+    await db.exec("set role anon");
+    assert.deepEqual((await db.query("select read_public_letter() as data")).rows[0].data.messages, []);
+    await assert.rejects(db.query("select add_public_comment($1,'spoiler')", [rows[0].id]), /unavailable/);
+    await db.exec("reset role");
+    const letter = (await db.query("select * from pick_daily_message(true)")).rows[0];
+    await db.exec("set role anon");
+    await db.query("select add_public_comment($1,'A & B ♡')", [letter.id]);
+    const snapshot = (await db.query("select read_public_letter() as data")).rows[0].data;
+    assert.equal(snapshot.messages.length, 1);
+    assert.equal(snapshot.comments[0].body, "A & B ♡");
+    assert.equal(snapshot.comments[0].user_id, null);
+    for (const body of ["", "x".repeat(281), "<img src=x onerror=alert(1)>"]) {
+      await assert.rejects(db.query("select add_public_comment($1,$2)", [letter.id, body]), /Invalid comment/);
+    }
+    await db.query("select save_public_fcm_token($1)", ["device-a".repeat(8)]);
+    await db.query("select save_public_fcm_token($1)", ["device-b".repeat(8)]);
+    await db.query("select save_public_fcm_token($1)", ["device-a".repeat(8)]);
+    for (const table of ["messages","comments","fcm_tokens","link_members"])
+      await assert.rejects(db.query("select * from " + table), /permission denied/);
+    await assert.rejects(db.query("select pick_daily_message(true)"), /permission denied/);
+    for (let i=0;i<9;i++) await db.query("select add_public_comment($1,'hello')", [letter.id]);
+    await assert.rejects(db.query("select add_public_comment($1,'hello')", [letter.id]), /Too many comments/);
+    await db.query("select remove_public_fcm_token($1)", ["device-a".repeat(8)]);
+    await db.exec("reset role");
+    assert.equal((await db.query("select count(*)::int as n from fcm_tokens")).rows[0].n, 1);
+  } finally { await db.close(); }
 });

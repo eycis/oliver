@@ -1,11 +1,6 @@
-import {
-  readAccessKey,
-  forgetAccessKey,
-  callLink,
-  type Snapshot,
-} from "./access";
+import { callPublic, type Snapshot } from "./access";
 import { useEffect, useRef, useState } from "react";
-import { Bell, Check, LogOut, Mail, X } from "lucide-react";
+import { Bell, Check, Mail, X } from "lucide-react";
 import {
   db,
   clean,
@@ -14,7 +9,6 @@ import {
   sample,
   type Message,
   type Comment,
-  type Member,
 } from "./data";
 function PixelHeart({ small = false }: { small?: boolean }) {
   return (
@@ -91,14 +85,7 @@ export default function App() {
   const dialogRef = useRef<HTMLElement>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
-  const [member, setMember] = useState<Member | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [accessKey, setAccessKey] = useState<string | null>(() =>
-    readAccessKey(),
-  );
-  const accessKeyRef = useRef(accessKey);
-  accessKeyRef.current = accessKey;
-  const userId = member?.id ?? null;
+  const [loadError, setLoadError] = useState(false);
   const [modal, setModal] = useState<"settings" | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -106,30 +93,16 @@ export default function App() {
   const [comment, setComment] = useState("");
   const demo = !db;
   useEffect(() => {
-    const acceptLink = () => {
-      if (!new URLSearchParams(location.hash.slice(1)).has("key")) return;
-      const nextKey = readAccessKey();
-      if (nextKey === accessKeyRef.current) return;
-      accessKeyRef.current = nextKey;
-      setAccessKey(nextKey);
-      if (db) {
-        setMember(null);
-        setMessages([]);
-        setComments([]);
-        setLoading(Boolean(nextKey));
-      }
-    };
-    window.addEventListener("hashchange", acceptLink);
-    return () => window.removeEventListener("hashchange", acceptLink);
+    localStorage.removeItem("love-private-key");
+    if (new URLSearchParams(location.hash.slice(1)).has("key"))
+      history.replaceState(null, "", location.pathname + location.search);
   }, []);
   async function refresh() {
-    if (!db || !accessKey) return;
-    const snapshot = await callLink<Snapshot>("read_letter", accessKey);
-    if (accessKeyRef.current !== accessKey) return;
+    if (!db) return;
+    const snapshot = await callPublic<Snapshot>("read_public_letter");
     setMessages(snapshot.messages);
     setComments(snapshot.comments);
-    setMembers(snapshot.members);
-    setMember(snapshot.member);
+    setLoadError(false);
   }
   useEffect(() => {
     if (!db) {
@@ -151,33 +124,33 @@ export default function App() {
       localStorage.setItem("love-demo", JSON.stringify({ messages, comments }));
   }, [messages, comments, demo]);
   useEffect(() => {
-    if (!db || !accessKey) {
+    if (!db) {
       setLoading(false);
       return;
     }
     const load = () =>
       refresh()
         .catch(() => {
-          setMember(null);
+          setLoadError(true);
           setMessages([]);
           setComments([]);
           setNotice(
-            "Odkaz se nepodařilo ověřit. Zkontroluj připojení nebo otevři soukromý odkaz znovu.",
+            "Vzkaz se nepodařilo načíst. Zkus to prosím za chvíli.",
           );
         })
         .finally(() => {
-          if (accessKeyRef.current === accessKey) setLoading(false);
+          setLoading(false);
         });
     void load();
     const timer = setInterval(load, 30000);
     return () => clearInterval(timer);
-  }, [accessKey]);
+  }, []);
   useEffect(() => {
-    if (!accessKey || !member) return;
+    if (!db) return;
     let cancelled = false;
     let stop = () => {};
     void import("./notifications")
-      .then((n) => n.startNotifications(accessKey))
+      .then((n) => n.startNotifications())
       .then((cleanup) => {
         if (cancelled) cleanup();
         else stop = cleanup;
@@ -189,7 +162,7 @@ export default function App() {
       cancelled = true;
       stop();
     };
-  }, [accessKey, member?.id]);
+  }, []);
   useEffect(() => {
     if (!notice) return;
     const id = setTimeout(() => setNotice(""), 6500);
@@ -262,11 +235,11 @@ export default function App() {
     await run(async () => {
       const payload = {
         message_id: current.id,
-        user_id: userId ?? "demo-author",
+        user_id: null,
         body: text,
       };
       if (db) {
-        await callLink("add_letter_comment", accessKey!, {
+        await callPublic("add_public_comment", {
           p_message_id: current.id,
           p_body: text,
         });
@@ -288,10 +261,10 @@ export default function App() {
       setNotice("Upozornění budou dostupná po připojení společné schránky.");
       return;
     }
-    if (!accessKey || !member) return;
+    if (!db) return;
     await run(async () => {
       const { enableNotifications } = await import("./notifications");
-      await enableNotifications(accessKey);
+      await enableNotifications();
       setNotice("Hotovo! Nové vzkazy se připomenou i na telefonu.");
     });
   }
@@ -316,11 +289,11 @@ export default function App() {
       <main>
         {loading ? (
           <div className="empty">Otevírám schránku…</div>
-        ) : !demo && !member ? (
+        ) : !demo && loadError ? (
           <section className="login panel">
             <PixelHeart />
             <p>
-              Otevři svůj soukromý odkaz. Na tomhle telefonu si ho zapamatuju.
+              Vzkaz se nepodařilo načíst. Zkontroluj připojení.
             </p>
           </section>
         ) : (
@@ -382,10 +355,6 @@ export default function App() {
                               <PixelHeart small />
                             </span>
                             <div>
-                              <strong>
-                                {members.find((m) => m.id === c.user_id)
-                                  ?.name ?? "Já"}{" "}
-                              </strong>
                               <p>{c.body}</p>
                             </div>
                           </div>
@@ -465,7 +434,7 @@ export default function App() {
               Na Androidu otevři web v Chrome. V nabídce ⋮ vyber „Přidat na
               plochu“ nebo „Nainstalovat aplikaci“.
             </p>
-            {(demo || member) && (
+            {(
               <button
                 className="primary"
                 disabled={busy}
@@ -480,26 +449,7 @@ export default function App() {
                 README projektu.
               </p>
             )}
-            {userId && (
-              <button
-                className="text-button"
-                onClick={() =>
-                  void run(async () => {
-                    const { disableNotifications } =
-                      await import("./notifications");
-                    await disableNotifications(accessKey!);
-                    forgetAccessKey();
-                    setAccessKey(null);
-                    setMessages([]);
-                    setComments([]);
-                    setMember(null);
-                    setModal(null);
-                  })
-                }
-              >
-                <LogOut size={16} /> Zapomenout přístup
-              </button>
-            )}
+
           </section>
         </div>
       )}

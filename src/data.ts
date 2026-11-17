@@ -30,7 +30,7 @@ export type Message = {
 export type Comment = {
   id: string;
   message_id: string;
-  user_id: string;
+  user_id: string | null;
   body: string;
   created_at: string;
 };

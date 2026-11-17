@@ -6,7 +6,7 @@ import {
   onMessage,
   deleteToken,
 } from "firebase/messaging";
-import { callLink } from "./access";
+import { callPublic } from "./access";
 const config: FirebaseOptions = JSON.parse(
   import.meta.env.VITE_FIREBASE_CONFIG || "{}",
 );
@@ -20,16 +20,16 @@ function messaging() {
     throw new Error("Chybí Firebase konfigurace.");
   return getMessaging(getApps()[0] ?? initializeApp(config));
 }
-export async function enableNotifications(key: string) {
+export async function enableNotifications() {
   if (!("Notification" in window) || !(await isSupported()))
     throw new Error("Tento prohlížeč nepodporuje oznámení.");
   const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
   if (!vapidKey) throw new Error("Chybí Firebase VAPID klíč.");
   if ((await Notification.requestPermission()) !== "granted")
     throw new Error("Povol oznámení v nastavení prohlížeče.");
-  await registerDevice(key, vapidKey);
+  await registerDevice(vapidKey);
 }
-async function registerDevice(key: string, vapidKey: string) {
+async function registerDevice(vapidKey: string) {
   const registration = await navigator.serviceWorker.ready;
   // Replace a subscription created by the old non-Firebase Web Push implementation.
   const existing = await registration.pushManager.getSubscription();
@@ -51,10 +51,10 @@ async function registerDevice(key: string, vapidKey: string) {
     serviceWorkerRegistration: registration,
   });
   if (!token) throw new Error("Nepodařilo se získat token telefonu.");
-  await callLink("save_fcm_token", key, { p_fcm_token: token });
+  await callPublic("save_public_fcm_token", { p_fcm_token: token });
   localStorage.setItem("love-fcm-token", token);
 }
-export async function startNotifications(key: string): Promise<() => void> {
+export async function startNotifications(): Promise<() => void> {
   if (
     !("Notification" in window) ||
     !config.projectId ||
@@ -65,7 +65,7 @@ export async function startNotifications(key: string): Promise<() => void> {
     Notification.permission === "granted" &&
     import.meta.env.VITE_FIREBASE_VAPID_KEY
   ) {
-    await registerDevice(key, import.meta.env.VITE_FIREBASE_VAPID_KEY);
+    await registerDevice(import.meta.env.VITE_FIREBASE_VAPID_KEY);
   }
   return onMessage(messaging(), async (payload) => {
     if (Notification.permission !== "granted") return;
@@ -78,10 +78,10 @@ export async function startNotifications(key: string): Promise<() => void> {
     });
   });
 }
-export async function disableNotifications(key: string) {
+export async function disableNotifications() {
   const token = localStorage.getItem("love-fcm-token");
   if (token) {
-    await callLink("remove_fcm_token", key, { p_fcm_token: token });
+    await callPublic("remove_public_fcm_token", { p_fcm_token: token });
     if (await isSupported()) await deleteToken(messaging());
     localStorage.removeItem("love-fcm-token");
   }

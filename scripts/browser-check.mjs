@@ -154,7 +154,8 @@ try {
   );
   assert.equal(
     await evaluate(`localStorage.getItem('love-private-key')`),
-    "a".repeat(43),
+    null,
+    "No access key is stored",
   );
   await evaluate(`localStorage.removeItem('love-private-key')`);
   console.log(
