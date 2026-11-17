@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       force_send:
-        description: "Send a test now (resends today’s notification, keeps the same message)"
+        description: "Otestovat hned: vybere dnešní vzkaz a odešle upozornění i mimo plán"
         type: boolean
-        default: false
+        default: true
 permissions:
   contents: read
 concurrency:
