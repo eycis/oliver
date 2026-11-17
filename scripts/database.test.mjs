@@ -102,11 +102,24 @@ test("Private links protect tables, authorship, unreleased messages and FCM toke
       .rows[0].data;
     assert.equal(snapshot.messages.length, 1);
     assert.equal(snapshot.comments[0].user_id, snapshot.member.id);
-    await assert.rejects(
-      db.query("select save_fcm_token($1,$2)", [author, "x".repeat(30)]),
-      /Recipient only/,
+    await db.query("select save_fcm_token($1,$2)", [
+      author,
+      "author-device".repeat(3),
+    ]);
+    await db.query("select save_fcm_token($1,$2)", [
+      recipient,
+      "recipient-device".repeat(3),
+    ]);
+    await db.exec("reset role");
+    assert.equal(
+      (
+        await db.query(
+          "select count(distinct member_id)::int as n from fcm_tokens",
+        )
+      ).rows[0].n,
+      2,
     );
-    await db.query("select save_fcm_token($1,$2)", [recipient, "x".repeat(30)]);
+    await db.exec("set role anon");
     for (let i = 0; i < 9; i++)
       await db.query("select add_letter_comment($1,$2,$3)", [
         recipient,
@@ -160,6 +173,12 @@ test("Upgrade preserves imported messages and existing comments", async () => {
     await db.exec(
       await readFile(
         "supabase/migrations/20261117_private_links_fcm.sql",
+        "utf8",
+      ),
+    );
+    await db.exec(
+      await readFile(
+        "supabase/migrations/20261117_equal_notifications.sql",
         "utf8",
       ),
     );

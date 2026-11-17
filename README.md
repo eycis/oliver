@@ -17,7 +17,7 @@ Bez nastavení Supabase se spouští lokální ukázka. Ta nesdílí komentáře
 
 ## 1. Supabase — pokud už máš nahrané vzkazy
 
-V SQL Editoru spusť **pouze** `supabase/migrations/20261117_private_links_fcm.sql`. Pokud jsi ještě neprovedla přechod na náhodný výběr, spusť nejdřív `supabase/migrations/20261116_random_daily_message.sql`. Existující `schema.sql` s náhodným výběrem už první migraci obsahoval.
+Pokud už máš soukromé odkazy, spusť pouze `supabase/migrations/20261117_equal_notifications.sql`. Pokud je ještě nemáš, spusť nejprve `supabase/migrations/20261117_private_links_fcm.sql` a potom `20261117_equal_notifications.sql`. Pokud jsi ještě neprovedla přechod na náhodný výběr, spusť nejdřív `supabase/migrations/20261116_random_daily_message.sql`. Existující `schema.sql` s náhodným výběrem už první migraci obsahoval.
 
 Nový projekt bez tabulek: jednou spusť celý aktuální `supabase/schema.sql`; samostatné migrace potom už nespouštěj. Migrace nejsou určeny k opakovanému spouštění.
 
@@ -86,7 +86,7 @@ Settings → Secrets and variables → Actions → **Secrets**:
 
 `APP_LINK` z birthday_gift tady nepotřebuješ: kliknutí na oznámení otevře adresu webu podle scope service workeru. Soukromý klíč ani text vzkazu se do FCM payloadu neposílají.
 
-Workflow kontroluje čas každých 15 minut (`7,22,37,52`). Odesílá v okně **10:17–11:29 Europe/Prague**, stejně jako birthday_gift, s automatickým letním časem. V databázi atomicky vybere jeden nepoužitý vzkaz pro dnešek; pak posílá oznámení pouze na zařízení aktivního `recipient` odkazu. Pro každý telefon eviduje úspěch zvlášť. Dočasné chyby se zkusí při dalším běhu znovu, vypršené tokeny odstraní. Po vyčerpání vzkazů nic nevybírá znovu.
+Workflow kontroluje čas každých 15 minut (`7,22,37,52`). Odesílá v okně **10:17–11:29 Europe/Prague**, stejně jako birthday_gift, s automatickým letním časem. V databázi atomicky vybere jeden nepoužitý vzkaz pro dnešek; pak posílá oznámení na zařízení obou aktivních soukromých odkazů. Pro každý telefon eviduje úspěch zvlášť. Dočasné chyby se zkusí při dalším běhu znovu, vypršené tokeny odstraní. Po vyčerpání vzkazů nic nevybírá znovu.
 
 Přijetí zprávy FCM negarantuje její zobrazení telefonem. Při pádu mezi odesláním a zápisem do DB se může oznámení opakovat; stejný tag omezuje hromadění duplicit. GitHub může běhy zpozdit nebo vynechat; ve veřejném repozitáři se plánování může vypnout po 60 dnech bez aktivity. Soukromý repozitář podléhá dostupným Actions minutám.
 
@@ -96,13 +96,15 @@ Přijetí zprávy FCM negarantuje její zobrazení telefonem. Při pádu mezi od
 2. V menu zvolí „posílej mi upozornění“ a povolí oznámení. V Supabase se objeví řádek `fcm_tokens`.
 3. GitHub → Actions → Daily love letter → Run workflow → `force_send = true`. To vybere dnešní vzkaz i mimo časové okno a odešle oznámení. Další ruční test pošle stejné dnešní oznámení znovu, nevybere jiný vzkaz.
 4. Vyzkoušej oznámení se zavřeným webem i s otevřenou aplikací. Jedno odeslání má vyvolat jedno oznámení. Otevření má ukázat stejný vzkaz a jeho datum.
-5. Ty otevři svůj `author` odkaz a přidej komentář; na jeho telefonu se načte do 30 sekund. Autor upozornění neodebírá.
+5. Ty otevři svůj `author` odkaz a přidej komentář; na jeho telefonu se načte do 30 sekund. Oba můžete zapnout upozornění na svých telefonech.
 6. Nakonec lze web přidat na plochu z nabídky prohlížeče. Pokud už měl telefon starý Web Push odběr, musí tlačítkem zaregistrovat nový Firebase odběr.
 
 ## Soubory a bezpečnost
 
 - Soukromá CSV, `.env`, `.private/` a běžné názvy service-account JSON jsou ignorované Gitem.
 - `supabase/VZKAZY.md` popisuje formát CSV a chování data zveřejnění.
-- Text komentáře čistí DOMPurify; server validuje prostý text a limit 280 znaků, identitu odvozuje z klíče, ne z hodnoty poslané klientem. Limit je 10 komentářů za minutu na odkaz a 10 odběrů na příjemce.
+- Text komentáře čistí DOMPurify; server validuje prostý text a limit 280 znaků, identitu odvozuje z klíče, ne z hodnoty poslané klientem. Limit je 10 komentářů za minutu na odkaz a 10 odběrů na osobu.
 - Bez klíče nelze načíst ani aktuální vzkaz. Ani platný odkaz nevrací budoucí vzkazy, celou zásobu, tokeny, hashe či serverové klíče. Staré e-mailové účty nemají přímá tabulková oprávnění.
 - `npm test` nezahrnuje skutečné externí služby. Volitelný `node scripts/browser-check.mjs` vyžaduje Vite na 5173 a izolovaný Chrome na debugging portu 9223; upravuje jen lokální ukázku.
+
+Oba odkazy mají stejné možnosti: čtení, komentáře a upozornění. Označení `author` a `recipient` jsou nyní jen identifikátory dvou osob, nikoliv rozdílná oprávnění. Každý dostává stejný denní vzkaz.

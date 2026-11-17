@@ -173,7 +173,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [accessKey]);
   useEffect(() => {
-    if (!accessKey || member?.role !== "recipient") return;
+    if (!accessKey || !member) return;
     let cancelled = false;
     let stop = () => {};
     void import("./notifications")
@@ -189,7 +189,7 @@ export default function App() {
       cancelled = true;
       stop();
     };
-  }, [accessKey, member?.role]);
+  }, [accessKey, member?.id]);
   useEffect(() => {
     if (!notice) return;
     const id = setTimeout(() => setNotice(""), 6500);
@@ -288,7 +288,7 @@ export default function App() {
       setNotice("Upozornění budou dostupná po připojení společné schránky.");
       return;
     }
-    if (!accessKey || member?.role !== "recipient") return;
+    if (!accessKey || !member) return;
     await run(async () => {
       const { enableNotifications } = await import("./notifications");
       await enableNotifications(accessKey);
@@ -465,7 +465,7 @@ export default function App() {
               Na Androidu otevři web v Chrome. V nabídce ⋮ vyber „Přidat na
               plochu“ nebo „Nainstalovat aplikaci“.
             </p>
-            {(demo || member?.role === "recipient") && (
+            {(demo || member) && (
               <button
                 className="primary"
                 disabled={busy}

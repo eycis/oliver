@@ -32,16 +32,11 @@ async function main() {
       );
     return result.data;
   };
-  const recipient = checked(
-    await db
-      .from("link_members")
-      .select("id")
-      .eq("role", "recipient")
-      .eq("active", true)
-      .maybeSingle(),
+  const members = checked(
+    await db.from("link_members").select("id").eq("active", true),
   );
-  if (!recipient) {
-    console.log("No active recipient link configured.");
+  if (!members.length) {
+    console.log("No active links configured.");
     return;
   }
   const messages = checked(
@@ -55,7 +50,10 @@ async function main() {
     await db
       .from("fcm_tokens")
       .select("id,token")
-      .eq("member_id", recipient.id),
+      .in(
+        "member_id",
+        members.map((member) => member.id),
+      ),
   );
   const { sent, failed } = await deliverMessages({
     db,
