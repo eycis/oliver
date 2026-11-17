@@ -61,6 +61,35 @@ function PixelFlower() {
     </svg>
   );
 }
+function PixelPothos({ side }: { side: "left" | "right" }) {
+  const leaves = [
+    { x: 2, y: 5, flip: false }, { x: 15, y: 22, flip: true },
+    { x: 1, y: 42, flip: false }, { x: 14, y: 61, flip: true },
+    { x: 4, y: 83, flip: false }, { x: 12, y: 103, flip: true },
+  ];
+  return (
+    <svg className={`pixel-pothos pothos-${side}`} viewBox="0 0 28 122"
+      aria-hidden="true" focusable="false" shapeRendering="crispEdges">
+      <path fill="none" stroke="#647d52" strokeWidth="2"
+        d="M15 0v12h-3v20h3v21h-3v20h4v22h-3v22" />
+      <path fill="none" stroke="#819668" d="M16 0v12M14 33v19M15 74v20" />
+      {leaves.map(({ x, y, flip }, index) => (
+        <g key={index} transform={`translate(${x} ${y})`}>
+          <g className="pothos-leaf">
+            <g transform={flip ? "translate(12 0) scale(-1 1)" : undefined}>
+              <path fill="#526b47"
+                d="M1 0h4v1h1v1h1V1h3v1h2v7h-1v3h-1v3H8v2H6v-1H4v-2H3v-2H2V9H1V6H0V2h1z" />
+              <path fill={index % 2 ? "#8fa66b" : "#a1b67b"}
+                d="M2 2h3v2h2V3h3v5H9v4H8v3H6v-2H4v-3H3V7H2z" />
+              <path fill="#d5d49a" d="M3 3h2v3h1v3h1v3H6V9H4V6H3zM8 4h1v3H8z" />
+              <path fill="#6d8756" d="M7 5h1v5H7v3H6V9h1z" />
+            </g>
+          </g>
+        </g>
+      ))}
+    </svg>
+  );
+}
 function PixelIcon({ kind }: { kind: "menu" | "send" }) {
   return (
     <svg
@@ -308,6 +337,8 @@ export default function App() {
                       </time>
                     </div>
                     <article className="letter" aria-labelledby="letter-title">
+                      <PixelPothos side="left" />
+                      <PixelPothos side="right" />
                       <div className="window-titlebar">
                         <svg className="mail-icon" viewBox="0 0 24 20" aria-hidden="true" shapeRendering="crispEdges">
                           <path fill="#fff5dd" stroke="#693f53" strokeWidth="2" d="M1 3h22v16H1z" />
@@ -315,7 +346,21 @@ export default function App() {
                           <path fill="#d16d98" d="M9 5h2v1h2V5h2v3h-1v1h-1v1h-2V9h-1V8H9z" />
                         </svg>
                         <span>vzkaz.txt</span>
-                        <span className="window-decoration" aria-hidden="true"><span className="corner-heart"><PixelHeart small /></span></span>
+                        <span className="window-decoration" aria-hidden="true">
+                          <svg className="corner-heart" viewBox="0 0 24 28" focusable="false">
+                            <ellipse cx="12" cy="25" rx="6" ry="1" fill="#a7728b" opacity=".4">
+                              <animate attributeName="rx" values="6;3;6" dur="1.4s" repeatCount="indefinite" />
+                            </ellipse>
+                            <g className="bouncing-heart">
+                              <animateTransform attributeName="transform" type="translate"
+                                values="4 10;4 3;4 10" dur="1.4s"
+                                calcMode="spline" keyTimes="0;.5;1"
+                                keySplines=".4 0 .6 1;.4 0 .6 1" repeatCount="indefinite" />
+                              <path fill="#a34e77" d="M2 0h4v1h1v1h2V1h1V0h4v1h1v1h1v5h-1v1h-1v1h-1v1h-1v1h-1v1h-1v1H9v1H7v-1H6v-1H5v-1H4v-1H3V9H2V8H1V7H0V2h1V1h1z" />
+                              <path fill="#ffe9f0" d="M3 2h3v2H3z" />
+                            </g>
+                          </svg>
+                        </span>
                       </div>
                       <span
                         className="pixel-corner top-left"
